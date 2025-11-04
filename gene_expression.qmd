@@ -1,0 +1,101 @@
+---
+title: "Differential Gene Expression Analysis"
+format: docx
+editor: visual
+---
+
+```{B}
+#Loading Packages
+library(dplyr)
+library(purrr)
+library(readr)
+library(edgeR)
+library(pathview)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+```
+
+```{D}
+#Download data
+scp ham14@144.175.88.28:"/home/johnson/rna-seq-johnsonra/*_gene_count_matrix.txt" .
+```
+
+```{W}
+#Data Wrangling
+# List the files
+files <- list.files("data", pattern = "*_gene_count_matrix.txt")
+
+# Create a list of data frames
+data <- map(file.path('data', files), 
+            ~ read.delim(.x, header = TRUE, skip = 1) |> select(c(1,6,7))) |>
+
+    # and merge into a single data frame
+    reduce(full_join, by = c('Geneid', 'Length'))
+
+# drop any bits of each name that aren't needed
+names(data) <- substr(names(data), 1, 11)
+
+# experimental groups
+group <- read_csv("data/groups.csv") |>
+    filter(aid %in% names(data)) # only keep accession IDs that were successfully aligned
+```
+
+```{E}
+# Create DGEList object
+y <- DGEList(counts = select(data, -Length, -Geneid),
+             group = group$CXCR4,
+             genes = data$Geneid,
+             remove.zeros = TRUE)
+
+# Filtering
+keep <- filterByExpr(y)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Normalization
+y <- calcNormFactors(y)
+```
+
+```{DEG}
+# Design matrix
+design <- model.matrix(~group$CXCR4)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+# Fit the model
+fit <- glmQLFit(y, design)
+
+# Conduct quasi-likelihood F-test
+qlf <- glmQLFTest(fit, coef=2)
+
+# Get the top differentially expressed genes
+top_tags <- topTags(qlf)
+```
+
+```{Plot}
+plotMD(qlf, main="Pos vs Neg")
+```
+
+```{K}
+# Perform KEGG analysis
+kegg_results <- kegga(qlf, species = "Mm")
+
+# Display top pathways
+topKEGG(kegg_results)
+```
+
+```{Pathview}
+
+# Get the logFC values for all genes
+logfc <- qlf$table$logFC
+
+# Get the Entrez IDs
+entrez_ids <- mapIds(org.Mm.eg.db, keys = qlf$genes$genes, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
+names(logfc) <- entrez_ids
+
+# Get the top pathway ID (since there are no sigificant pathways, we'll go with the MAPK signaling pathway)
+top_pathway_id <- "04010" #rownames(topKEGG(kegg_results))[1]
+
+# Generate the pathview
+pathview(gene.data = logfc, pathway.id = top_pathway_id, species = "mmu", kegg.native = TRUE)
+```

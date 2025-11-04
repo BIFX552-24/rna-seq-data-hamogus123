@@ -1,0 +1,54 @@
+---
+title: "RNA Seq"
+format: html
+editor: visual
+---
+
+## 
+
+```{bash setup}
+#| echo: fasle
+#| eval: false
+
+#working directory on the cluster: ~/rna_seq
+
+#link to my data
+ln -s /home/ham14/data/SRR35819952_* .
+```
+
+```{bash}
+#| label: download
+#| echo: false
+#| eval: true
+
+#Download the dataset
+fasterq-dump SRR35819952
+
+#gzip dataset
+gzip SRR35819952_?.fastq
+
+```
+
+```{QC}
+#| echo: false
+#| eval: false
+
+#Run QC
+fastqc SRR35819952_?.fastq.gz
+```
+
+```{Trim and Rerun QC}
+#| echo: false
+#| eval: false
+
+#Trim
+trimmomatic PE -threads 1 \
+  SRR35819952_1.fastq.gz SRR35819952_2.fastq.gz \
+  r1_trim.fastq.gz r1_trim_unpaired.fastq.gz \
+  r2_trim.fastq.gz r2_trim_unpaired.fastq.gz \
+  SLIDINGWINDOW:4:20
+  MINLEN:25
+  
+#Re-run QC
+fastqc r?_trim.fastq.gz
+```
