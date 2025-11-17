@@ -30,6 +30,7 @@ gzip SRR35819952_?.fastq
 ```
 
 ```{QC}
+#| label: QC
 #| echo: false
 #| eval: false
 

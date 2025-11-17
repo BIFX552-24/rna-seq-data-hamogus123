@@ -4,33 +4,43 @@ format: docx
 editor: visual
 ---
 
-```{B}
+```{r}
+#| include: false
 #Loading Packages
 library(dplyr)
 library(purrr)
 library(readr)
 library(edgeR)
+library(stringr)
+library(tools)
 library(pathview)
 library(AnnotationDbi)
 library(org.Mm.eg.db)
 ```
 
-```{D}
+### **Download the data**
+
+We’ll start this section by downloading the data we generated as a class over the past week.
+
+```{r}
 #Download data
-scp ham14@144.175.88.28:"/home/johnson/rna-seq-johnsonra/*_gene_count_matrix.txt" .
+# scp ham14@144.175.88.28:"/home/johnson/rna-seq-johnsonra/*_gene_count_matrix.txt" data
 ```
 
-```{W}
-#Data Wrangling
+### **Data Wrangling**
+
+We should be ready to load the data and prepare it for our differential gene expression analysis.
+
+```{r}
 # List the files
 files <- list.files("data", pattern = "*_gene_count_matrix.txt")
 
 # Create a list of data frames
-data <- map(file.path('data', files), 
-            ~ read.delim(.x, header = TRUE, skip = 1) |> select(c(1,6,7))) |>
+data <- purrr::map(file.path("data", files),
+                   ~ read.delim(.x, header = TRUE, skip = 1) |>
+                     dplyr::select(1, 6, 7)) |>
+  purrr::reduce(dplyr::full_join, by = c("Geneid", "Length"))
 
-    # and merge into a single data frame
-    reduce(full_join, by = c('Geneid', 'Length'))
 
 # drop any bits of each name that aren't needed
 names(data) <- substr(names(data), 1, 11)
@@ -40,22 +50,28 @@ group <- read_csv("data/groups.csv") |>
     filter(aid %in% names(data)) # only keep accession IDs that were successfully aligned
 ```
 
-```{E}
-# Create DGEList object
-y <- DGEList(counts = select(data, -Length, -Geneid),
+### **Differential gene expression analysis with edgeR**
+
+First we’ll start with a `DGEList` object and filter genes that are not abundant enough to be considered.
+
+```{r}
+#Create DGEList object
+y <- DGEList(counts = dplyr::select(data, -Length, -Geneid),
              group = group$CXCR4,
              genes = data$Geneid,
              remove.zeros = TRUE)
 
-# Filtering
+#Filtering
 keep <- filterByExpr(y)
 y <- y[keep, , keep.lib.sizes=FALSE]
 
-# Normalization
+#Normalization
 y <- calcNormFactors(y)
 ```
 
-```{DEG}
+Next we’ll create a design matrix based on our experimental metadata and run the DEG analysis.
+
+```{r}
 # Design matrix
 design <- model.matrix(~group$CXCR4)
 
@@ -72,11 +88,19 @@ qlf <- glmQLFTest(fit, coef=2)
 top_tags <- topTags(qlf)
 ```
 
-```{Plot}
+### **MD Plot**
+
+A mean-difference plot is a useful way to visualize the results of the differential expression analysis.
+
+```{r}
 plotMD(qlf, main="Pos vs Neg")
 ```
 
-```{K}
+### **KEGG Pathway Analysis**
+
+We will use the `kegga` function to perform KEGG pathway analysis on the differentially expressed genes.
+
+```{r}
 # Perform KEGG analysis
 kegg_results <- kegga(qlf, species = "Mm")
 
@@ -84,8 +108,11 @@ kegg_results <- kegga(qlf, species = "Mm")
 topKEGG(kegg_results)
 ```
 
-```{Pathview}
+### **Pathview Visualization**
 
+Finally, we could use `pathview` to visualize the differentially expressed genes on a KEGG pathway, typically the top pathway from our analysis.
+
+```{r}
 # Get the logFC values for all genes
 logfc <- qlf$table$logFC
 
@@ -93,9 +120,10 @@ logfc <- qlf$table$logFC
 entrez_ids <- mapIds(org.Mm.eg.db, keys = qlf$genes$genes, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
 names(logfc) <- entrez_ids
 
-# Get the top pathway ID (since there are no sigificant pathways, we'll go with the MAPK signaling pathway)
+# Get the top pathway ID 
 top_pathway_id <- "04010" #rownames(topKEGG(kegg_results))[1]
 
 # Generate the pathview
 pathview(gene.data = logfc, pathway.id = top_pathway_id, species = "mmu", kegg.native = TRUE)
+
 ```
